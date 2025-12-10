@@ -1,0 +1,145 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <DHT.h>
+
+// ===== OLED =====
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET   -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// ===== DHT22 =====
+#define DHTPIN   4
+#define DHTTYPE  DHT22
+DHT dht(DHTPIN, DHTTYPE);
+
+// ===== MQ2 =====
+const int MQ2_AO   = 36;   // Analog out from MQ2
+const int MQ2_DO   = 15;   // Digital out from MQ2
+
+// ===== Flame sensor =====
+const int FLAME_DO = 5;    // Digital out from flame sensor
+
+// ===== Outputs =====
+const int BUZZER    = 23;  // Active buzzer
+const int RED_LED   = 19;  // Red LED anode via 220R
+const int GREEN_LED = 18;  // Green LED anode via 220R
+
+// ===== Thresholds =====
+int   mq2AnalogThresh = 1500;  // 0–4095
+float tempFireThresh  = 60.0;  // °C
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // I2C for OLED
+  Wire.begin(21, 22);
+
+  pinMode(MQ2_DO,   INPUT);
+  pinMode(FLAME_DO, INPUT);
+
+  pinMode(BUZZER,    OUTPUT);
+  pinMode(RED_LED,   OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+
+  digitalWrite(BUZZER, LOW);
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(GREEN_LED, HIGH);
+
+  dht.begin();
+
+  // OLED init
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED init failed");
+    while (true);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Echo Gas Defender");
+  display.display();
+  delay(1500);
+
+  Serial.println("ESP32 Echo Gas Defender - Gas + Flame + Temp Alarm");
+  Serial.println("Warming MQ2 sensor...");
+  delay(20000);  // MQ2 warmup
+}
+
+void loop() {
+  // ----- Read sensors -----
+  float temp = dht.readTemperature();
+  float hum  = dht.readHumidity();
+
+  int gasAnalog  = analogRead(MQ2_AO);
+  int gasDigital = digitalRead(MQ2_DO);
+  int flameState = digitalRead(FLAME_DO); // LOW = flame on most boards
+
+  bool gasDanger   = (gasAnalog > mq2AnalogThresh) || (gasDigital == LOW);
+  bool flameDanger = (flameState == LOW);
+  bool tempDanger  = (!isnan(temp) && temp > tempFireThresh);
+
+  bool danger = gasDanger || flameDanger || tempDanger;
+
+  // ----- Outputs: LEDs + Buzzer -----
+  if (danger) {
+    digitalWrite(RED_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
+
+    digitalWrite(BUZZER, HIGH);
+    delay(150);
+    digitalWrite(BUZZER, LOW);
+    delay(150);
+  } else {
+    digitalWrite(RED_LED, LOW);
+    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(BUZZER, LOW);
+    delay(300);
+  }
+
+  // ----- Serial monitor -----
+  Serial.print("T: "); Serial.print(temp);
+  Serial.print("C  H: "); Serial.print(hum);
+  Serial.print("%  MQ2_A: "); Serial.print(gasAnalog);
+  Serial.print("  MQ2_D: "); Serial.print(gasDigital);
+  Serial.print("  Flame_D: "); Serial.print(flameState);
+  Serial.print("  -> ");
+  if (danger) {
+    Serial.print("ALARM (");
+    if (gasDanger)   Serial.print("GAS ");
+    if (flameDanger) Serial.print("FLAME ");
+    if (tempDanger)  Serial.print("TEMP ");
+    Serial.println(")");
+  } else {
+    Serial.println("SAFE");
+  }
+
+  // ----- OLED display -----
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("Echo Gas Defender");
+
+  display.setCursor(0, 14);
+  display.print("T: "); display.print(temp, 1); display.println(" C");
+
+  display.setCursor(0, 26);
+  display.print("H: "); display.print(hum, 1); display.println(" %");
+
+  display.setCursor(0, 38);
+  display.print("Gas: "); display.print(gasAnalog);
+
+  display.setCursor(0, 50);
+  if (danger) {
+    display.print("ALARM: ");
+    if (gasDanger)   display.print("Gas ");
+    if (flameDanger) display.print("Flame ");
+    if (tempDanger)  display.print("Temp ");
+  } else {
+    display.print("Status: SAFE");
+  }
+
+  display.display();
+}
