@@ -53,3 +53,9 @@ GPIO21     → OLED SDA
 GPIO22     → OLED SCL
 
 
+
+## Credits
+
+Created by **[JP HariKrishna Raj]**  
+Project: **Echo Gas Defender**
+
